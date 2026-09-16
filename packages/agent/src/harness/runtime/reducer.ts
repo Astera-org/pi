@@ -1,7 +1,10 @@
 import type { HarnessEvent, LaneSnapshot, LaneWatchEvent } from "../agent-harness.ts";
-import type { OperationResultRecord } from "../session/types.ts";
+import type { ContextBoundaryType, OperationResultRecord } from "../session/types.ts";
 
 export type LaneSnapshotReduction = "rebase" | undefined;
+
+/** Value imports would pull the session barrel into this entry point's graph; see check-entry-graphs. */
+const CONTEXT_BOUNDARY_ENTRIES: Record<ContextBoundaryType, true> = { compaction: true, transcript: true };
 
 type LaneOperationSnapshot = NonNullable<LaneSnapshot["operation"]>;
 
@@ -156,8 +159,9 @@ export function reduceLaneSnapshot(
 					if (index !== -1) operation.runningTools.splice(index, 1);
 				}
 			}
-			if (event.entry.type === "compaction") snapshot.transcript.splice(0, snapshot.transcript.length, event.entry);
-			else snapshot.transcript.push(event.entry);
+			if (event.entry.type in CONTEXT_BOUNDARY_ENTRIES) {
+				snapshot.transcript.splice(0, snapshot.transcript.length, event.entry);
+			} else snapshot.transcript.push(event.entry);
 			snapshot.tipId = event.entry.id;
 			if (event.entry.type === "message") snapshot.stats.messageCount += 1;
 			return;

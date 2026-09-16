@@ -17,7 +17,13 @@ import type {
 } from "../../session/types.ts";
 import { branchTip, deleteValue, pendingEntry, setValue } from "../../session/values.ts";
 import type { Lane } from "../lane.ts";
-import { committedEntryEvents, entryLifecycleEvents, readBoundedContext, readLaneQueues } from "../transcript.ts";
+import {
+	committedEntryEvents,
+	entryLifecycleEvents,
+	pendingEntryToNewEntry,
+	readBoundedContext,
+	readLaneQueues,
+} from "../transcript.ts";
 import type { Drive, LaneState, ProcedureResult } from "../types.ts";
 import { operationCleanupWrites, operationResultRecord } from "./terminal.ts";
 
@@ -105,7 +111,9 @@ export async function planBoundaryInbox<TContext extends object | undefined>(
 		);
 	let pending = await load(selected);
 	const projects = (value: (typeof pending)[number]["pending"]): boolean =>
-		value.type === "message" || lane.readConfig().entryProjectors[value.customType] !== undefined;
+		value.type === "message" ||
+		value.type === "transcript" ||
+		lane.readConfig().entryProjectors[value.customType] !== undefined;
 	if (followUpWhenNoTrigger && !pending.some(({ pending: value }) => projects(value))) {
 		const followUp = state.inbox.filter((item) => item.kind === "followUp");
 		const selectedFollowUp = scope.settings.followUpMode === "all" ? followUp : followUp.slice(0, 1);
@@ -116,16 +124,7 @@ export async function planBoundaryInbox<TContext extends object | undefined>(
 	let parentId = tipId;
 	let triggerEntryId: string | undefined;
 	const entries: NewEntry[] = pending.map(({ item, pending: value }) => {
-		const entry: NewEntry =
-			value.type === "message"
-				? { id: item.entryId, parentId, type: "message", message: value.payload }
-				: {
-						id: item.entryId,
-						parentId,
-						type: "custom",
-						customType: value.customType,
-						...(value.payload === undefined ? {} : { data: value.payload }),
-					};
+		const entry: NewEntry = pendingEntryToNewEntry(item.entryId, parentId, value);
 		parentId = item.entryId;
 		if (projects(value)) triggerEntryId = item.entryId;
 		return entry;

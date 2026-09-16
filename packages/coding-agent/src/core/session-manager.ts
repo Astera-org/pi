@@ -149,6 +149,14 @@ export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
 	display: boolean;
 }
 
+export interface TranscriptEntry<T = unknown> extends SessionEntryBase {
+	type: "transcript";
+	messages: AgentMessage[];
+	reason?: string;
+	details?: T;
+	source?: string;
+}
+
 /** Session entry - has id/parentId for tree structure (returned by "read" methods in SessionManager) */
 export type SessionEntry =
 	| SessionMessageEntry
@@ -159,7 +167,8 @@ export type SessionEntry =
 	| CustomEntry
 	| CustomMessageEntry
 	| LabelEntry
-	| SessionInfoEntry;
+	| SessionInfoEntry
+	| TranscriptEntry;
 
 /** Raw file entry (includes header) */
 export type FileEntry = SessionHeader | SessionEntry;
@@ -415,7 +424,14 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 		const summary = createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp);
 		return entry.systemMessage ? [entry.systemMessage, summary] : [summary];
 	}
+	if (entry.type === "transcript") {
+		return entry.messages;
+	}
 	return [];
+}
+
+export function isContextBoundaryEntry(entry: SessionEntry): entry is CompactionEntry | TranscriptEntry {
+	return entry.type === "compaction" || entry.type === "transcript";
 }
 
 /**
@@ -432,23 +448,29 @@ export function buildContextEntries(
 	byId?: Map<string, SessionEntry>,
 ): SessionEntry[] {
 	const path = buildSessionPath(entries, leafId, byId);
-	let compaction: CompactionEntry | null = null;
+	let boundary: CompactionEntry | TranscriptEntry | null = null;
 
 	for (const entry of path) {
-		if (entry.type === "compaction") {
-			compaction = entry;
+		if (isContextBoundaryEntry(entry)) {
+			boundary = entry;
 		}
 	}
 
-	if (!compaction) {
+	if (!boundary) {
 		return path;
 	}
 
-	const compactionIdx = path.findIndex((entry) => entry.id === compaction.id);
-	if (compactionIdx < 0) {
+	const boundaryIdx = path.findIndex((entry) => entry.id === boundary.id);
+	if (boundaryIdx < 0) {
 		return path;
 	}
 
+	if (boundary.type === "transcript") {
+		return path.slice(boundaryIdx);
+	}
+
+	const compaction = boundary;
+	const compactionIdx = boundaryIdx;
 	const contextEntries: SessionEntry[] = [compaction];
 	let foundFirstKept = false;
 	for (let i = 0; i < compactionIdx; i++) {
@@ -1141,6 +1163,24 @@ export class SessionManager {
 			usage,
 			fromHook,
 			...(systemMessage ? { systemMessage: { ...systemMessage, timestamp: new Date(timestamp).getTime() } } : {}),
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	appendTranscript<T = unknown>(
+		messages: AgentMessage[],
+		options?: { reason?: string; details?: T; source?: string },
+	): string {
+		const entry: TranscriptEntry<T> = {
+			type: "transcript",
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			messages: messages.slice(),
+			...(options?.reason === undefined ? {} : { reason: options.reason }),
+			...(options?.details === undefined ? {} : { details: options.details }),
+			...(options?.source === undefined ? {} : { source: options.source }),
 		};
 		this._appendEntry(entry);
 		return entry.id;

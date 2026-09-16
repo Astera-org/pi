@@ -75,6 +75,7 @@ import type {
 	SummaryDecidingOperation,
 	Write,
 } from "../session/types.ts";
+import { CONTEXT_BOUNDARY_TYPES } from "../session/types.ts";
 import {
 	branchTip,
 	deleteValue,
@@ -93,7 +94,13 @@ import { formatSkillInvocation } from "../skills.ts";
 import { durableBranchPreparation, durableCompactionPreparation } from "./drive/structural.ts";
 import { driveOperation } from "./drive.ts";
 import { readAssistantFrames } from "./progress.ts";
-import { chainEntries, committedEntryEvents, readLaneQueues } from "./transcript.ts";
+import {
+	chainEntries,
+	committedEntryEvents,
+	pendingEntryToNewEntry,
+	pendingEntryToQueuedItem,
+	readLaneQueues,
+} from "./transcript.ts";
 import {
 	type Config,
 	type ContinueOperationResult,
@@ -185,15 +192,7 @@ function durableLaneState(
 }
 
 function pendingEntryWrite(entryId: string, pending: PendingEntry): NewEntry {
-	return pending.type === "message"
-		? { id: entryId, parentId: null, type: "message", message: pending.payload }
-		: {
-				id: entryId,
-				parentId: null,
-				type: "custom",
-				customType: pending.customType,
-				...(pending.payload === undefined ? {} : { data: pending.payload }),
-			};
+	return pendingEntryToNewEntry(entryId, null, pending);
 }
 
 function capturedModel(operation: Operation): ModelIdentity | undefined {
@@ -703,7 +702,7 @@ export class Lane<TContext extends object | undefined> implements AgentLane {
 					? []
 					: (
 							await reader.scanBranch(
-								{ start: state.tipId, stopAtType: "compaction", order: "newestFirst" },
+								{ start: state.tipId, stopAtType: CONTEXT_BOUNDARY_TYPES, order: "newestFirst" },
 								context,
 							)
 						).reverse();
@@ -1732,7 +1731,7 @@ export class Lane<TContext extends object | undefined> implements AgentLane {
 				? []
 				: (
 						await reader.scanBranch(
-							{ start: captured.tipId, stopAtType: "compaction", order: "newestFirst" },
+							{ start: captured.tipId, stopAtType: CONTEXT_BOUNDARY_TYPES, order: "newestFirst" },
 							context,
 						)
 					).reverse();
@@ -1921,6 +1920,31 @@ export class Lane<TContext extends object | undefined> implements AgentLane {
 		return this.append({ type: "custom", customType, ...(data === undefined ? {} : { payload: data }) }, context);
 	}
 
+	/**
+	 * Replace the model-visible transcript with `messages`.
+	 *
+	 * Writes a boundary entry rather than mutating history: earlier entries stay in
+	 * storage for the session tree, forking and the UI, but context construction stops
+	 * here. Called while an operation is running, the replacement is queued as a write
+	 * and lands at the next turn boundary, like any other queued entry.
+	 */
+	replaceTranscript(
+		messages: AgentMessage[],
+		options: { reason?: string; details?: JsonValue; source?: string } | undefined,
+		context: Context,
+	): Promise<string> {
+		return this.append(
+			{
+				type: "transcript",
+				messages,
+				...(options?.reason === undefined ? {} : { reason: options.reason }),
+				...(options?.details === undefined ? {} : { details: options.details }),
+				...(options?.source === undefined ? {} : { source: options.source }),
+			},
+			context,
+		);
+	}
+
 	private append(pending: PendingEntry, context: Context): Promise<string> {
 		this.assertOpen();
 		if (
@@ -1967,15 +1991,7 @@ export class Lane<TContext extends object | undefined> implements AgentLane {
 			const inbox = [...state.inbox, { entryId: id, kind: "write" as const }];
 			const queues = [
 				...(await readLaneQueues(reader, state.inbox, context)),
-				pending.type === "message"
-					? { entryId: id, kind: "write" as const, type: "message" as const, message: pending.payload }
-					: {
-							entryId: id,
-							kind: "write" as const,
-							type: "custom" as const,
-							customType: pending.customType,
-							...(pending.payload === undefined ? {} : { data: pending.payload }),
-						},
+				pendingEntryToQueuedItem(id, pending),
 			];
 			return {
 				kind: "commit",

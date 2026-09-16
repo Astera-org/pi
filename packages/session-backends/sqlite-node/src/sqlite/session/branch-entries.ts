@@ -1,4 +1,10 @@
-import type { Entry, EntryStructure, StorageBranchScan } from "@earendil-works/pi-agent-core";
+import {
+	CONTEXT_BOUNDARY_TYPES,
+	type Entry,
+	type EntryStructure,
+	type EntryType,
+	type StorageBranchScan,
+} from "@earendil-works/pi-agent-core";
 import { joinSqlFragments, type SqlQuery, sql } from "../sql.ts";
 import type { SqliteDatabase } from "../types.ts";
 import { decodeEntryRow, type EntryRow } from "./entries.ts";
@@ -39,12 +45,12 @@ interface BranchTipRow {
 	branch_id: string;
 }
 
-interface CompactionBoundary {
+interface ContextBoundary {
 	branchId: string;
 	seq: number;
 }
 
-interface CompactionBoundaryRow {
+interface ContextBoundaryRow {
 	entry_seq: number | null;
 }
 
@@ -110,11 +116,17 @@ function readBranchSegmentsNewestFirst(db: SqliteDatabase, sessionId: string, st
 	return segments;
 }
 
-function readNewestCompactionBoundary(
+/**
+ * Find the newest context boundary on the branch.
+ *
+ * Context construction never reads past a boundary, so a new branch only has to
+ * materialize entries from the newest one onward.
+ */
+function readNewestContextBoundary(
 	db: SqliteDatabase,
 	sessionId: string,
 	segmentsNewestFirst: readonly BranchSegment[],
-): CompactionBoundary | undefined {
+): ContextBoundary | undefined {
 	for (const segment of segmentsNewestFirst) {
 		const row = sql`SELECT MAX(entry_seq) AS entry_seq
 			FROM branch_entries
@@ -122,7 +134,7 @@ function readNewestCompactionBoundary(
 				AND branch_id = ${segment.branchId}
 				AND entry_seq > ${segment.lowerSeq}
 				AND entry_seq <= ${segment.upperSeq}
-				AND entry_type = ${"compaction"}`.get<CompactionBoundaryRow>(db);
+				AND entry_type IN (${entryTypeList(CONTEXT_BOUNDARY_TYPES)})`.get<ContextBoundaryRow>(db);
 		if (row?.entry_seq !== null && row?.entry_seq !== undefined)
 			return { branchId: segment.branchId, seq: row.entry_seq };
 	}
@@ -152,14 +164,14 @@ function copyBranchEntriesAfterSeqThroughParent(
 function createDivergentBranchForEntry(db: SqliteDatabase, sessionId: string, entry: Entry): void {
 	if (entry.parentId === null) throw new Error("Root entries do not create divergent branches");
 	const segmentsNewestFirst = readBranchSegmentsNewestFirst(db, sessionId, entry.parentId);
-	const compaction = readNewestCompactionBoundary(db, sessionId, segmentsNewestFirst);
+	const boundary = readNewestContextBoundary(db, sessionId, segmentsNewestFirst);
 	const branchId = entry.id;
 	// A null base means this segment stores its own root-through-parent prefix.
 	sql`INSERT INTO branch_meta (session_id, branch_id, tip_entry_id, tip_seq, base_branch_id, base_seq)
-		VALUES (${sessionId}, ${branchId}, ${entry.id}, ${entry.seq}, ${compaction?.branchId ?? null}, ${compaction?.seq ?? null})`.run(
+		VALUES (${sessionId}, ${branchId}, ${entry.id}, ${entry.seq}, ${boundary?.branchId ?? null}, ${boundary?.seq ?? null})`.run(
 		db,
 	);
-	copyBranchEntriesAfterSeqThroughParent(db, sessionId, branchId, segmentsNewestFirst, compaction?.seq ?? 0);
+	copyBranchEntriesAfterSeqThroughParent(db, sessionId, branchId, segmentsNewestFirst, boundary?.seq ?? 0);
 	insertBranchEntry(db, sessionId, branchId, entry);
 }
 
@@ -177,9 +189,22 @@ export function appendEntryToBranchIndex(db: SqliteDatabase, sessionId: string, 
 	appendEntryToExistingBranch(db, sessionId, branch.branch_id, entry);
 }
 
+/** Renders a list of entry types as a parameterized `IN (...)` value list. */
+function entryTypeList(types: readonly EntryType[]): SqlQuery {
+	return joinSqlFragments(
+		types.map((type) => sql`${type}`),
+		", ",
+	);
+}
+
 function stopPredicates(query: StorageBranchScan): SqlQuery[] {
 	const predicates: SqlQuery[] = [];
-	if (query.stopAtType !== undefined) predicates.push(sql`b.entry_type = ${query.stopAtType}`);
+	const stopAtType = query.stopAtType;
+	if (typeof stopAtType === "string") {
+		predicates.push(sql`b.entry_type = ${stopAtType}`);
+	} else if (stopAtType !== undefined && stopAtType.length > 0) {
+		predicates.push(sql`b.entry_type IN (${entryTypeList(stopAtType)})`);
+	}
 	if (query.stopAtId !== undefined) predicates.push(sql`b.entry_id = ${query.stopAtId}`);
 	return predicates;
 }

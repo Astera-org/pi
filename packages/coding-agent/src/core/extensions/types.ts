@@ -1385,6 +1385,16 @@ export interface ExtensionAPI {
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
 	appendEntry<T = unknown>(customType: string, data?: T): void;
 
+	replaceTranscript(
+		messages: AgentMessage[],
+		options?: {
+			reason?: string;
+			details?: unknown;
+			source?: string;
+			deliverAs?: "steer" | "followUp" | "nextTurn";
+		},
+	): void;
+
 	// =========================================================================
 	// Session Metadata
 	// =========================================================================
@@ -1646,6 +1656,16 @@ export type SendUserMessageHandler = (
 
 export type AppendEntryHandler = <T = unknown>(customType: string, data?: T) => void;
 
+export type ReplaceTranscriptHandler = (
+	messages: AgentMessage[],
+	options?: {
+		reason?: string;
+		details?: unknown;
+		source?: string;
+		deliverAs?: "steer" | "followUp" | "nextTurn";
+	},
+) => void;
+
 export type SetSessionNameHandler = (name: string) => void;
 
 export type GetSessionNameHandler = () => string | undefined;
@@ -1708,6 +1728,7 @@ export interface ExtensionActions {
 	sendMessage: SendMessageHandler;
 	sendUserMessage: SendUserMessageHandler;
 	appendEntry: AppendEntryHandler;
+	replaceTranscript: ReplaceTranscriptHandler;
 	setSessionName: SetSessionNameHandler;
 	getSessionName: GetSessionNameHandler;
 	setLabel: SetLabelHandler;

@@ -7,6 +7,7 @@ import type {
 	CompactionEntry,
 	CustomEntry,
 	MessageEntry,
+	TranscriptEntry,
 } from "../../src/harness/session/types.ts";
 import type { AgentMessage } from "../../src/types.ts";
 
@@ -256,5 +257,109 @@ describe("session context projection", () => {
 				BACKGROUND_CONTEXT,
 			),
 		).rejects.toBe(failure);
+	});
+});
+
+describe("transcript replacement boundary", () => {
+	const replacement = (
+		id: string,
+		parentId: string | null,
+		seq: number,
+		messages: AgentMessage[],
+	): TranscriptEntry => ({
+		id,
+		parentId,
+		seq,
+		timestamp: NOW,
+		type: "transcript",
+		messages,
+	});
+
+	it("drops everything before the boundary and projects its own messages", async () => {
+		const state = userMessage("state: phase=2");
+		const entries = [
+			messageEntry("a", null, 1, userMessage("original task")),
+			messageEntry("b", "a", 2, assistantMessage("stop", "step one")),
+			replacement("boundary", "b", 3, [state]),
+			messageEntry("c", "boundary", 4, userMessage("latest observation")),
+		];
+
+		expect(await buildSessionContext(entries, undefined, BACKGROUND_CONTEXT)).toEqual([
+			state,
+			userMessage("latest observation"),
+		]);
+	});
+
+	it("keeps only the newest boundary when several are present", async () => {
+		const first = userMessage("state: phase=1");
+		const second = userMessage("state: phase=2");
+		const entries = [
+			messageEntry("a", null, 1, userMessage("original task")),
+			replacement("first", "a", 2, [first]),
+			messageEntry("b", "first", 3, userMessage("middle")),
+			replacement("second", "b", 4, [second]),
+		];
+
+		expect(await buildSessionContext(entries, undefined, BACKGROUND_CONTEXT)).toEqual([second]);
+	});
+
+	it("supersedes an earlier compaction", async () => {
+		const state = userMessage("state only");
+		const compaction: CompactionEntry = {
+			id: "compaction",
+			parentId: "a",
+			seq: 2,
+			timestamp: NOW,
+			type: "compaction",
+			summary: "earlier summary",
+			retainedTail: [userMessage("retained")],
+			tokensBefore: 1000,
+			fromHook: false,
+		};
+		const entries = [
+			messageEntry("a", null, 1, userMessage("original task")),
+			compaction,
+			replacement("boundary", "compaction", 3, [state]),
+		];
+
+		expect(await buildSessionContext(entries, undefined, BACKGROUND_CONTEXT)).toEqual([state]);
+	});
+
+	it("is superseded by a later compaction", async () => {
+		const compaction: CompactionEntry = {
+			id: "compaction",
+			parentId: "boundary",
+			seq: 3,
+			timestamp: NOW,
+			type: "compaction",
+			summary: "later summary",
+			retainedTail: [],
+			tokensBefore: 1000,
+			fromHook: false,
+		};
+		const entries = [
+			messageEntry("a", null, 1, userMessage("original task")),
+			replacement("boundary", "a", 2, [userMessage("state only")]),
+			compaction,
+		];
+
+		expect(await buildSessionContext(entries, undefined, BACKGROUND_CONTEXT)).toEqual([
+			{ role: "compactionSummary", summary: "later summary", tokensBefore: 1000, timestamp: NOW },
+		]);
+	});
+
+	it("filters non-context messages out of the replacement", async () => {
+		const entries = [
+			replacement("boundary", null, 1, [
+				userMessage("kept"),
+				assistantMessage("error", "failed"),
+				assistantMessage("stop", "kept answer"),
+			]),
+		];
+
+		expect(await buildSessionContext(entries, undefined, BACKGROUND_CONTEXT)).toEqual([
+			userMessage("kept"),
+			assistantMessage("stop", "kept answer"),
+		]);
 	});
 });

@@ -190,6 +190,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		sendMessage: notInitialized,
 		sendUserMessage: notInitialized,
 		appendEntry: notInitialized,
+		replaceTranscript: notInitialized,
 		setSessionName: notInitialized,
 		getSessionName: notInitialized,
 		setLabel: notInitialized,
@@ -375,6 +376,11 @@ function createExtensionAPI(
 		appendEntry(customType: string, data?: unknown): void {
 			assertActive();
 			runtime.appendEntry(customType, data);
+		},
+
+		replaceTranscript(messages, options): void {
+			assertActive();
+			runtime.replaceTranscript(messages, options);
 		},
 
 		setSessionName(name: string): void {

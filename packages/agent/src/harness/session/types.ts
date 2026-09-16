@@ -13,7 +13,20 @@ export type SettledAssistantMessage = AssistantMessage & {
 	stopReason: Exclude<StopReason, "pending">;
 };
 
-export type EntryType = "message" | "compaction" | "branch_summary" | "custom";
+export type EntryType = "message" | "compaction" | "branch_summary" | "custom" | "transcript";
+
+export const CONTEXT_BOUNDARY_TYPES = ["compaction", "transcript"] as const satisfies readonly EntryType[];
+
+export type ContextBoundaryType = (typeof CONTEXT_BOUNDARY_TYPES)[number];
+
+export function isContextBoundary(type: EntryType): boolean {
+	return type === "compaction" || type === "transcript";
+}
+
+export function matchesStopAtType(type: EntryType, stopAtType: EntryType | readonly EntryType[] | undefined): boolean {
+	if (stopAtType === undefined) return false;
+	return typeof stopAtType === "string" ? type === stopAtType : stopAtType.includes(type);
+}
 
 export interface EntryBase {
 	id: string;
@@ -55,13 +68,21 @@ export interface CustomEntry extends EntryBase {
 	data?: JsonValue;
 }
 
+export interface TranscriptEntry extends EntryBase {
+	type: "transcript";
+	messages: AgentMessage[];
+	reason?: string;
+	details?: JsonValue;
+	source?: string;
+}
+
 /** Convert an application-defined custom entry into model context. */
 export type EntryProjector = (
 	entry: CustomEntry,
 	context: Context,
 ) => AgentMessage[] | undefined | Promise<AgentMessage[] | undefined>;
 
-export type Entry = MessageEntry | CompactionEntry | BranchSummaryEntry | CustomEntry;
+export type Entry = MessageEntry | CompactionEntry | BranchSummaryEntry | CustomEntry | TranscriptEntry;
 
 /** Entry supplied to a transaction before storage assigns sequence and timestamp. */
 export type NewEntry<TEntry extends Entry = Entry> = TEntry extends Entry ? Omit<TEntry, "seq" | "timestamp"> : never;
@@ -349,7 +370,8 @@ export interface LaneState {
 
 export type PendingEntry =
 	| { type: "message"; payload: AgentMessage }
-	| { type: "custom"; customType: string; payload?: JsonValue };
+	| { type: "custom"; customType: string; payload?: JsonValue }
+	| { type: "transcript"; messages: AgentMessage[]; reason?: string; details?: JsonValue; source?: string };
 
 export interface DurableFileOperations {
 	read: string[];
@@ -420,7 +442,7 @@ export interface EntryCursor {
 
 export interface BranchScan {
 	start?: string;
-	stopAtType?: EntryType;
+	stopAtType?: EntryType | readonly EntryType[];
 	stopAtId?: string;
 	type?: EntryType;
 	customType?: string;

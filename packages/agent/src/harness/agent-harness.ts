@@ -223,7 +223,8 @@ export type LaneQueuedItem =
 			type: "message";
 			message: AgentMessage;
 	  }
-	| { entryId: string; kind: "write"; type: "custom"; customType: string; data?: JsonValue };
+	| { entryId: string; kind: "write"; type: "custom"; customType: string; data?: JsonValue }
+	| { entryId: string; kind: "write"; type: "transcript"; messages: AgentMessage[]; reason?: string };
 
 export interface LaneSnapshot {
 	lane: string;
@@ -542,6 +543,11 @@ export interface AgentLane {
 	findEntry(query: BranchScan | undefined, context: Context): Promise<Entry | undefined>;
 	appendMessage(message: AgentMessage, context: Context): Promise<string>;
 	appendCustomEntry(customType: string, data: JsonValue | undefined, context: Context): Promise<string>;
+	replaceTranscript(
+		messages: AgentMessage[],
+		options: { reason?: string; details?: JsonValue; source?: string } | undefined,
+		context: Context,
+	): Promise<string>;
 	getResult(operationId: string, context: Context): Promise<OperationResultRecord | undefined>;
 	accept(request: OperationRequest, context: Context): Promise<OperationAdmissionResult>;
 	drive(options: DriveOptions, context: Context): Promise<DriveResult>;

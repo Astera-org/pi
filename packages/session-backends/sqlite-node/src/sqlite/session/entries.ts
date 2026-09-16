@@ -6,6 +6,7 @@ import type {
 	EntryScan,
 	EntryStructure,
 	MessageEntry,
+	TranscriptEntry,
 } from "@earendil-works/pi-agent-core";
 import { joinSqlFragments, type SqlQuery, sql } from "../sql.ts";
 import type { SqliteDatabase, SqliteStatement } from "../types.ts";
@@ -57,6 +58,15 @@ function entryPayload(entry: Entry): StoredEntryPayload<Entry> {
 		}
 		case "custom": {
 			const payload: StoredEntryPayload<CustomEntry> = entry.data === undefined ? {} : { data: entry.data };
+			return payload;
+		}
+		case "transcript": {
+			const payload: StoredEntryPayload<TranscriptEntry> = {
+				messages: entry.messages,
+				...(entry.reason === undefined ? {} : { reason: entry.reason }),
+				...(entry.details === undefined ? {} : { details: entry.details }),
+				...(entry.source === undefined ? {} : { source: entry.source }),
+			};
 			return payload;
 		}
 	}
@@ -117,6 +127,8 @@ export function decodeEntryRow(row: EntryRow): Entry {
 		case "custom":
 			if (row.custom_type === null) throw new Error(`Custom entry ${row.id} is missing custom_type`);
 			return { ...base, type: "custom", customType: row.custom_type, ...parsePayload<CustomEntry>(row) };
+		case "transcript":
+			return { ...base, type: "transcript", ...parsePayload<TranscriptEntry>(row) };
 	}
 }
 
