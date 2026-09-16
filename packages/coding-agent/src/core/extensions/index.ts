@@ -123,6 +123,7 @@ export type {
 	RegisteredCommand,
 	RegisteredTool,
 	ReplacedSessionContext,
+	ReplaceTranscriptHandler,
 	ResolvedCommand,
 	// Events - Resources
 	ResourcesDiscoverEvent,

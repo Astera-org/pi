@@ -26,8 +26,10 @@ import { convertToLlm } from "../messages.ts";
 import {
 	buildSessionContext,
 	type CompactionEntry,
+	isContextBoundaryEntry,
 	type SessionEntry,
 	sessionEntryToContextMessages,
+	type TranscriptEntry,
 } from "../session-manager.ts";
 import {
 	computeFileLists,
@@ -90,13 +92,12 @@ function extractFileOperations(
  * Extract AgentMessage from an entry if it produces one.
  * Returns undefined for entries that don't contribute to LLM context.
  */
-function getMessageFromEntryForCompaction(entry: SessionEntry): AgentMessage | undefined {
+function getMessagesFromEntryForCompaction(entry: SessionEntry): AgentMessage[] {
 	if (entry.type === "compaction") {
-		return undefined;
+		return [];
 	}
 	// System messages are prompt state, not conversation; the compaction entry carries their replay.
-	const message = sessionEntryToContextMessages(entry)[0];
-	return message?.role === "system" ? undefined : message;
+	return sessionEntryToContextMessages(entry).filter((message) => message.role !== "system");
 }
 
 /** Result from compact() - SessionManager adds uuid/parentUuid when saving */
@@ -766,26 +767,34 @@ export function prepareCompaction(
 	pathEntries: SessionEntry[],
 	settings: CompactionSettings,
 ): CompactionPreparation | undefined {
-	if (pathEntries.length > 0 && pathEntries[pathEntries.length - 1].type === "compaction") {
+	if (pathEntries.length > 0 && isContextBoundaryEntry(pathEntries[pathEntries.length - 1])) {
 		return undefined;
 	}
 
-	let prevCompactionIndex = -1;
+	let prevBoundary: CompactionEntry | TranscriptEntry | undefined;
+	let prevBoundaryIndex = -1;
 	for (let i = pathEntries.length - 1; i >= 0; i--) {
-		if (pathEntries[i].type === "compaction") {
-			prevCompactionIndex = i;
+		const entry = pathEntries[i];
+		if (isContextBoundaryEntry(entry)) {
+			prevBoundary = entry;
+			prevBoundaryIndex = i;
 			break;
 		}
 	}
 
 	let previousSummary: string | undefined;
 	let boundaryStart = 0;
-	if (prevCompactionIndex >= 0) {
-		const prevCompaction = pathEntries[prevCompactionIndex] as CompactionEntry;
-		previousSummary = prevCompaction.summary;
-		const firstKeptEntryIndex = pathEntries.findIndex((entry) => entry.id === prevCompaction.firstKeptEntryId);
-		boundaryStart = firstKeptEntryIndex >= 0 ? firstKeptEntryIndex : prevCompactionIndex + 1;
+	if (prevBoundary !== undefined) {
+		if (prevBoundary.type === "transcript") {
+			boundaryStart = prevBoundaryIndex;
+		} else {
+			previousSummary = prevBoundary.summary;
+			const keptId = prevBoundary.firstKeptEntryId;
+			const firstKeptEntryIndex = pathEntries.findIndex((entry) => entry.id === keptId);
+			boundaryStart = firstKeptEntryIndex >= 0 ? firstKeptEntryIndex : prevBoundaryIndex + 1;
+		}
 	}
+	const prevCompactionIndex = prevBoundary?.type === "compaction" ? prevBoundaryIndex : -1;
 	const boundaryEnd = pathEntries.length;
 
 	const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
@@ -804,16 +813,14 @@ export function prepareCompaction(
 	// Messages to summarize (will be discarded after summary)
 	const messagesToSummarize: AgentMessage[] = [];
 	for (let i = boundaryStart; i < historyEnd; i++) {
-		const msg = getMessageFromEntryForCompaction(pathEntries[i]);
-		if (msg) messagesToSummarize.push(msg);
+		messagesToSummarize.push(...getMessagesFromEntryForCompaction(pathEntries[i]));
 	}
 
 	// Messages for turn prefix summary (if splitting a turn)
 	const turnPrefixMessages: AgentMessage[] = [];
 	if (cutPoint.isSplitTurn) {
 		for (let i = cutPoint.turnStartIndex; i < cutPoint.firstKeptEntryIndex; i++) {
-			const msg = getMessageFromEntryForCompaction(pathEntries[i]);
-			if (msg) turnPrefixMessages.push(msg);
+			turnPrefixMessages.push(...getMessagesFromEntryForCompaction(pathEntries[i]));
 		}
 	}
 

@@ -20,16 +20,17 @@ export type {
 	PreparedCommit,
 } from "./commit.ts";
 
-import type {
-	Entry,
-	EntryScan,
-	EntryStructure,
-	ForkOptions,
-	SessionStats,
-	StorageBranchScan,
-	UsageRow,
-	UsageScan,
-	Write,
+import {
+	type Entry,
+	type EntryScan,
+	type EntryStructure,
+	type ForkOptions,
+	matchesStopAtType,
+	type SessionStats,
+	type StorageBranchScan,
+	type UsageRow,
+	type UsageScan,
+	type Write,
 } from "./types.ts";
 import {
 	branchTip,
@@ -287,7 +288,7 @@ export class InMemoryStorageState {
 		const stopped: Entry[] = [];
 		for (const candidate of path) {
 			stopped.push(candidate);
-			if (candidate.id === query.stopAtId || candidate.type === query.stopAtType) break;
+			if (candidate.id === query.stopAtId || matchesStopAtType(candidate.type, query.stopAtType)) break;
 		}
 		const filtered = stopped
 			.filter((candidate) => query.type === undefined || candidate.type === query.type)

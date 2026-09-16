@@ -1,5 +1,5 @@
 import type { HarnessEvent, LaneSnapshot, LaneWatchEvent } from "../agent-harness.ts";
-import type { OperationResultRecord } from "../session/types.ts";
+import { isContextBoundary, type OperationResultRecord } from "../session/types.ts";
 
 export type LaneSnapshotReduction = "rebase" | undefined;
 
@@ -156,8 +156,9 @@ export function reduceLaneSnapshot(
 					if (index !== -1) operation.runningTools.splice(index, 1);
 				}
 			}
-			if (event.entry.type === "compaction") snapshot.transcript.splice(0, snapshot.transcript.length, event.entry);
-			else snapshot.transcript.push(event.entry);
+			if (isContextBoundary(event.entry.type)) {
+				snapshot.transcript.splice(0, snapshot.transcript.length, event.entry);
+			} else snapshot.transcript.push(event.entry);
 			snapshot.tipId = event.entry.id;
 			if (event.entry.type === "message") snapshot.stats.messageCount += 1;
 			return;

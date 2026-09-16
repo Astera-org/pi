@@ -1497,6 +1497,49 @@ pi.on("session_start", async (_event, ctx) => {
 });
 ```
 
+### pi.replaceTranscript(messages, options?)
+
+Replace the LLM-visible transcript with `messages`.
+
+This writes a **boundary entry**: context construction stops there and uses the messages you supply. Everything earlier stays in the session for history, forking, tree navigation and the TUI, but is never sent to the LLM again.
+
+```typescript
+pi.replaceTranscript(
+  [{ role: "user", content: currentState, timestamp: Date.now() }],
+  { reason: "bounded to structured state", source: "my-extension" },
+);
+```
+
+**Options:**
+- `reason` - Short explanation, shown in the TUI next to the boundary.
+- `source` - Identifier of the extension that wrote the boundary.
+- `details` - Arbitrary metadata stored on the entry (not sent to the LLM).
+- `deliverAs` - When the replacement lands if the agent is streaming:
+  - `"steer"` (default) - End of the current turn, before the next LLM call.
+  - `"followUp"` - Once the run settles and no tool calls remain.
+  - `"nextTurn"` - Alongside the next user prompt.
+
+When the agent is idle, `"steer"` and `"followUp"` apply immediately; `"nextTurn"` always waits for the next prompt.
+
+#### Why not just rewrite the `context` event?
+
+The [`context`](#context) event can also replace the message array, but only for a single LLM call. Use it for per-call filtering. Use `replaceTranscript()` when the old history is genuinely finished, because the boundary is durable:
+
+| | `context` event | `replaceTranscript()` |
+| --- | --- | --- |
+| Survives reload and branch navigation | no | yes |
+| Re-derived on every LLM call | yes | no |
+| Model-visible context growth | unbounded | bounded at the boundary |
+| Visible to pi's context accounting | no | yes |
+
+The session file itself still grows either way: a boundary bounds what the model sees, not what is stored. Earlier entries remain on disk and are still traversed for history, forking and tree navigation.
+
+#### Tool-call pairing
+
+A replacement is never applied between a tool call and its result — that would leave `tool_result` blocks with no matching `tool_use`, which providers reject. While the agent is streaming the replacement is queued until the next safe point, chosen with `deliverAs`. Messages that arrive after the boundary follow it normally, so a later turn's tool results still sit with their own assistant message.
+
+See [skill-state.ts](../examples/extensions/skill-state.ts) for a complete example that holds context at O(1) across an arbitrarily long run.
+
 ### pi.setSessionName(name)
 
 Set the session display name (shown in session selector instead of first message).

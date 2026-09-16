@@ -77,7 +77,11 @@ export class ExperimentalChatView {
 		this.pendingMessages.clear();
 		for (const item of queues) {
 			const text =
-				item.type === "message" ? userMessageText(item.message).replace(/\s+/g, " ") : `<${item.customType}>`;
+				item.type === "message"
+					? userMessageText(item.message).replace(/\s+/g, " ")
+					: item.type === "transcript"
+						? `<transcript replacement: ${item.messages.length} messages>`
+						: `<${item.customType}>`;
 			this.pendingMessages.addChild(new TruncatedText(theme.fg("muted", `[${item.kind}] ${text}`), 1, 0));
 		}
 	}
@@ -100,6 +104,11 @@ export class ExperimentalChatView {
 		if (entry.type === "compaction") {
 			this.#addText(theme.fg("muted", `[compaction] compacted from ${entry.tokensBefore} tokens`));
 			for (const retained of entry.retainedTail) this.#addMessage(retained);
+			return;
+		}
+		if (entry.type === "transcript") {
+			this.#addText(theme.fg("muted", `[transcript replaced]${entry.reason ? ` ${entry.reason}` : ""}`));
+			for (const replacement of entry.messages) this.#addMessage(replacement);
 			return;
 		}
 		if (entry.type === "branch_summary") {

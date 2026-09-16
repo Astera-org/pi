@@ -4,7 +4,16 @@ import type { Context } from "../context.ts";
 import { materializeCommittedEntry } from "../session/commit.ts";
 import { buildSessionContext } from "../session/context.ts";
 import { SessionInvariantError } from "../session/session.ts";
-import type { CommitResult, Entry, InboxItem, NewEntry, OperationState, SessionReader } from "../session/types.ts";
+import {
+	CONTEXT_BOUNDARY_TYPES,
+	type CommitResult,
+	type Entry,
+	type InboxItem,
+	type NewEntry,
+	type OperationState,
+	type PendingEntry,
+	type SessionReader,
+} from "../session/types.ts";
 import { pendingEntry } from "../session/values.ts";
 import type { Lane } from "./lane.ts";
 import type { ContinueOperationResult, Drive } from "./types.ts";
@@ -18,6 +27,54 @@ export function chainEntries<T extends { id: string }>(
 		parentId = item.id;
 		return entry;
 	});
+}
+
+export function pendingEntryToQueuedItem(entryId: string, pending: PendingEntry): LaneQueuedItem {
+	switch (pending.type) {
+		case "message":
+			return { entryId, kind: "write", type: "message", message: pending.payload };
+		case "transcript":
+			return {
+				entryId,
+				kind: "write",
+				type: "transcript",
+				messages: pending.messages,
+				...(pending.reason === undefined ? {} : { reason: pending.reason }),
+			};
+		case "custom":
+			return {
+				entryId,
+				kind: "write",
+				type: "custom",
+				customType: pending.customType,
+				...(pending.payload === undefined ? {} : { data: pending.payload }),
+			};
+	}
+}
+
+export function pendingEntryToNewEntry(entryId: string, parentId: string | null, pending: PendingEntry): NewEntry {
+	switch (pending.type) {
+		case "message":
+			return { id: entryId, parentId, type: "message", message: pending.payload };
+		case "transcript":
+			return {
+				id: entryId,
+				parentId,
+				type: "transcript",
+				messages: pending.messages,
+				...(pending.reason === undefined ? {} : { reason: pending.reason }),
+				...(pending.details === undefined ? {} : { details: pending.details }),
+				...(pending.source === undefined ? {} : { source: pending.source }),
+			};
+		case "custom":
+			return {
+				id: entryId,
+				parentId,
+				type: "custom",
+				customType: pending.customType,
+				...(pending.payload === undefined ? {} : { data: pending.payload }),
+			};
+	}
 }
 
 export function entryLifecycleEvents(entry: Entry, lane: string, runId?: string): HarnessEvent[] {
@@ -57,7 +114,7 @@ export function readBoundedEntries<TContext extends object | undefined, TState e
 		async (state, _current, _meta, reader) => {
 			if (state.tipId === null) throw new SessionInvariantError("Run operation has no Branch tip");
 			const entries = await reader.scanBranch(
-				{ start: state.tipId, stopAtType: "compaction", order: "newestFirst" },
+				{ start: state.tipId, stopAtType: CONTEXT_BOUNDARY_TYPES, order: "newestFirst" },
 				drive.context,
 			);
 			return { kind: "return", result: entries.reverse() };
@@ -99,6 +156,15 @@ export function readLaneQueues(
 			}
 			if (item.kind !== "write") {
 				throw new SessionInvariantError(`Pending ${item.kind} entry ${item.entryId} is not a message`);
+			}
+			if (stored.value.type === "transcript") {
+				return {
+					entryId: item.entryId,
+					kind: "write",
+					type: "transcript",
+					messages: stored.value.messages,
+					...(stored.value.reason === undefined ? {} : { reason: stored.value.reason }),
+				};
 			}
 			return {
 				entryId: item.entryId,

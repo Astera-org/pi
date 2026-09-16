@@ -310,6 +310,20 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 // AgentSession Class
 // ============================================================================
 
+export type TranscriptDeliverAs = "steer" | "followUp" | "nextTurn";
+
+export interface TranscriptReplacementOptions {
+	reason?: string;
+	details?: unknown;
+	source?: string;
+}
+
+const TRANSCRIPT_DELIVERY_ORDER: Record<TranscriptDeliverAs, number> = {
+	steer: 0,
+	followUp: 1,
+	nextTurn: 2,
+};
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -330,6 +344,11 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	/** Transcript replacement waiting for a point where rewriting context is safe. */
+	private _transcriptReplacedDuringRun = false;
+	private _pendingTranscriptReplacement:
+		| { messages: AgentMessage[]; deliverAs: TranscriptDeliverAs; options?: TranscriptReplacementOptions }
+		| undefined;
 	/** Context-only custom messages queued during a run, flushed once the current turn's tool results are in. */
 	private _pendingCustomMessages: CustomMessage[] = [];
 
@@ -568,7 +587,8 @@ export class AgentSession {
 				? async (_turn: PrepareNextTurnContext, signal?: AbortSignal) => await this.agent.prepareNextTurn?.(signal)
 				: undefined);
 		this.agent.prepareNextTurnWithContext = async (turn, signal) => {
-			const context = await this._compactBeforeNextAssistantResponse(turn.context);
+			const replaced = this._takeTranscriptReplacementForNextTurn(turn.context);
+			const context = await this._compactBeforeNextAssistantResponse(replaced);
 			const previousSnapshot = await previousPrepareNextTurnWithContext?.({ ...turn, context }, signal);
 			const nextContext = previousSnapshot?.context ?? context;
 			const runOptions = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
@@ -735,6 +755,7 @@ export class AgentSession {
 		// handlers queued.
 		if (event.type === "turn_end") {
 			this._flushPendingCustomMessages();
+			this._flushPendingTranscriptReplacement("steer");
 		}
 	};
 
@@ -1152,6 +1173,7 @@ export class AgentSession {
 			this._runSystemPromptOptions = undefined;
 			this._flushPendingBashMessages();
 			this._flushPendingCustomMessages();
+			this._flushPendingTranscriptReplacement("followUp");
 			await this._emitAgentSettled();
 		}
 	}
@@ -1277,6 +1299,7 @@ export class AgentSession {
 			// Flush any pending bash and custom messages before the new prompt
 			this._flushPendingBashMessages();
 			this._flushPendingCustomMessages();
+			this._flushPendingTranscriptReplacement("nextTurn");
 
 			// Validate model
 			if (!this.model) {
@@ -1585,6 +1608,40 @@ export class AgentSession {
 		);
 		this._emit({ type: "message_start", message: appMessage });
 		this._emit({ type: "message_end", message: appMessage });
+	}
+
+	async replaceTranscript(
+		messages: AgentMessage[],
+		options?: TranscriptReplacementOptions & { deliverAs?: TranscriptDeliverAs },
+	): Promise<void> {
+		const deliverAs = options?.deliverAs ?? "steer";
+		if (!this.isStreaming && deliverAs !== "nextTurn") {
+			this._applyTranscriptReplacement(messages, options);
+			return;
+		}
+		this._pendingTranscriptReplacement = { messages, deliverAs, ...(options === undefined ? {} : { options }) };
+	}
+
+	private _applyTranscriptReplacement(messages: AgentMessage[], options?: TranscriptReplacementOptions): void {
+		const entryId = this.sessionManager.appendTranscript(messages, options);
+		this.agent.state.messages = messages;
+		this._transcriptReplacedDuringRun = true;
+		const entry = this.sessionManager.getEntry(entryId);
+		if (entry) this._emit({ type: "entry_appended", entry });
+	}
+
+	private _takeTranscriptReplacementForNextTurn(context: AgentContext): AgentContext {
+		if (!this._transcriptReplacedDuringRun) return context;
+		this._transcriptReplacedDuringRun = false;
+		return { ...context, messages: this.agent.state.messages.slice() };
+	}
+
+	private _flushPendingTranscriptReplacement(at: TranscriptDeliverAs): void {
+		const pending = this._pendingTranscriptReplacement;
+		if (pending === undefined) return;
+		if (TRANSCRIPT_DELIVERY_ORDER[pending.deliverAs] > TRANSCRIPT_DELIVERY_ORDER[at]) return;
+		this._pendingTranscriptReplacement = undefined;
+		this._applyTranscriptReplacement(pending.messages, pending.options);
 	}
 
 	/**
@@ -2659,6 +2716,15 @@ export class AgentSession {
 					if (entry) {
 						this._emit({ type: "entry_appended", entry });
 					}
+				},
+				replaceTranscript: (messages, options) => {
+					this.replaceTranscript(messages, options).catch((err) => {
+						runner.emitError({
+							extensionPath: "<runtime>",
+							event: "replace_transcript",
+							error: err instanceof Error ? err.message : String(err),
+						});
+					});
 				},
 				setSessionName: (name) => {
 					this.setSessionName(name);

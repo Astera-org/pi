@@ -254,6 +254,7 @@ export {
 	type CustomMessageEntry,
 	type FileEntry,
 	getLatestCompactionEntry,
+	isContextBoundaryEntry,
 	type ModelChangeEntry,
 	migrateSessionEntries,
 	type NewSessionOptions,
@@ -269,6 +270,7 @@ export {
 	type SessionTreeNode,
 	sessionEntryToContextMessages,
 	type ThinkingLevelChangeEntry,
+	type TranscriptEntry,
 } from "./core/session-manager.ts";
 export {
 	type CompactionModelOverride,
