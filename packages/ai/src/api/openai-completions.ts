@@ -598,6 +598,25 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 						});
 					}
 
+					if (choice.logprobs?.content) {
+						const block = ensureTextBlock();
+						block.logprobs ??= [];
+						for (const entry of choice.logprobs.content) {
+							block.logprobs.push({
+								token: entry.token,
+								logprob: entry.logprob,
+								bytes: entry.bytes ?? undefined,
+								topLogprobs: entry.top_logprobs?.length
+									? entry.top_logprobs.map((top) => ({
+											token: top.token,
+											logprob: top.logprob,
+											bytes: top.bytes ?? undefined,
+										}))
+									: undefined,
+							});
+						}
+					}
+
 					// Some endpoints return reasoning in reasoning_content (llama.cpp),
 					// or reasoning (other openai compatible endpoints)
 					// Use the first non-empty reasoning field to avoid duplication
@@ -843,6 +862,13 @@ function buildParams(
 
 	if (options?.temperature !== undefined) {
 		params.temperature = options.temperature;
+	}
+
+	if (options?.logprobs) {
+		params.logprobs = true;
+		if (options.topLogprobs !== undefined) {
+			params.top_logprobs = options.topLogprobs;
+		}
 	}
 
 	if (transcriptTools.requestTools.length > 0) {
