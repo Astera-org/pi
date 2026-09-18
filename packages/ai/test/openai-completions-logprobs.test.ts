@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { stream as streamOpenAICompletions } from "../src/api/openai-completions.ts";
+import {
+	stream as streamOpenAICompletions,
+	streamSimple as streamSimpleOpenAICompletions,
+} from "../src/api/openai-completions.ts";
 import type { Model } from "../src/types.ts";
 import { normalizeContext } from "../src/utils/transcript.ts";
 
@@ -83,6 +86,42 @@ describe("OpenAI completions logprobs", () => {
 		const params = mockState.lastParams as { logprobs?: boolean; top_logprobs?: number };
 		expect(params.logprobs).toBe(true);
 		expect(params.top_logprobs).toBe(3);
+	});
+
+	it("forwards logprobs and topLogprobs through streamSimple", async () => {
+		mockState.chunks = [{ id: "chatcmpl-simple", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }];
+
+		await streamSimpleOpenAICompletions(model, context, {
+			apiKey: "test",
+			logprobs: true,
+			topLogprobs: 2,
+		}).result();
+
+		const params = mockState.lastParams as { logprobs?: boolean; top_logprobs?: number };
+		expect(params.logprobs).toBe(true);
+		expect(params.top_logprobs).toBe(2);
+	});
+
+	it("does not create a stray text block for a tool-call chunk with empty logprobs.content", async () => {
+		mockState.chunks = [
+			{
+				id: "chatcmpl-5",
+				choices: [
+					{
+						index: 0,
+						delta: {
+							tool_calls: [{ index: 0, id: "call-1", function: { name: "noop", arguments: "{}" } }],
+						},
+						logprobs: { content: [] },
+						finish_reason: "tool_calls",
+					},
+				],
+			},
+		];
+
+		const message = await streamOpenAICompletions(model, context, { apiKey: "test", logprobs: true }).result();
+
+		expect(message.content.some((block) => block.type === "text")).toBe(false);
 	});
 
 	it("accumulates per-token logprobs onto the text content block", async () => {

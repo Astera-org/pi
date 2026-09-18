@@ -51,6 +51,7 @@ function cloneTextContent(content: TextContent): TextContent {
 		type: "text",
 		text: content.text,
 		...(content.textSignature === undefined ? {} : { textSignature: content.textSignature }),
+		...(content.logprobs === undefined ? {} : { logprobs: structuredClone(content.logprobs) }),
 	};
 }
 

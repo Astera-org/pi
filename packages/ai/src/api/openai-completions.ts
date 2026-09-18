@@ -598,7 +598,7 @@ export const stream: StreamFunction<"openai-completions", OpenAICompletionsOptio
 						});
 					}
 
-					if (choice.logprobs?.content) {
+					if (choice.logprobs?.content && choice.logprobs.content.length > 0) {
 						const block = ensureTextBlock();
 						block.logprobs ??= [];
 						for (const entry of choice.logprobs.content) {

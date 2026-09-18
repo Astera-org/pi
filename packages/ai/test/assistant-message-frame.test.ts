@@ -61,6 +61,32 @@ describe("assistant message frames", () => {
 		]);
 	});
 
+	it("preserves logprobs captured on a text block through text_start snapshots", () => {
+		const partial = seed();
+		const encoder = new AssistantMessageFrameEncoder();
+		const frames: AssistantMessageFrame[] = [frame(encoder, { type: "start", partial })];
+		const logprobs = [{ token: "Hel", logprob: -0.1, bytes: [72, 101, 108] }];
+		partial.content.push({ type: "text", text: "Hel", logprobs });
+		const textStart = frame(encoder, { type: "text_start", contentIndex: 0, partial });
+		frames.push(textStart);
+
+		expect(textStart).toEqual({
+			type: "text_start",
+			contentIndex: 0,
+			content: { type: "text", text: "Hel", logprobs },
+		});
+
+		// Mutating the source after encoding must not leak into the captured frame.
+		logprobs.push({ token: "lo", logprob: -0.2 });
+		expect(textStart.type === "text_start" && textStart.content.logprobs).toEqual([
+			{ token: "Hel", logprob: -0.1, bytes: [72, 101, 108] },
+		]);
+
+		expect(reduceAssistantMessageFrames(frames)?.content).toEqual([
+			{ type: "text", text: "Hel", logprobs: [{ token: "Hel", logprob: -0.1, bytes: [72, 101, 108] }] },
+		]);
+	});
+
 	it("preserves provider thinking level from the stream start", () => {
 		const partial = seed();
 		partial.providerThinkingLevel = "high";
