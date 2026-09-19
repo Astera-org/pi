@@ -8,6 +8,7 @@ import {
 	AssistantMessageFrameEncoder,
 	type Model,
 	reduceAssistantMessageFrames,
+	type TokenLogprob,
 } from "../src/index.ts";
 import { AssistantMessageEventStream } from "../src/utils/event-stream.ts";
 
@@ -65,7 +66,7 @@ describe("assistant message frames", () => {
 		const partial = seed();
 		const encoder = new AssistantMessageFrameEncoder();
 		const frames: AssistantMessageFrame[] = [frame(encoder, { type: "start", partial })];
-		const logprobs = [{ token: "Hel", logprob: -0.1, bytes: [72, 101, 108] }];
+		const logprobs: TokenLogprob[] = [{ token: "Hel", logprob: -0.1, bytes: [72, 101, 108] }];
 		partial.content.push({ type: "text", text: "Hel", logprobs });
 		const textStart = frame(encoder, { type: "text_start", contentIndex: 0, partial });
 		frames.push(textStart);
