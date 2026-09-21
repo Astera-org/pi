@@ -198,6 +198,18 @@ export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
 	 * OpenAI-compatible adapters (completions, responses, Azure responses); other APIs ignore it.
 	 */
 	samplingParams?: Record<string, unknown>;
+	/**
+	 * Request per-token logprobs for the generated text. Only honored by
+	 * OpenAI-compatible adapters (completions); other APIs ignore it. Whether
+	 * the specific upstream provider actually returns logprobs depends on that
+	 * provider's own API support. Populates `TextContent.logprobs`.
+	 */
+	logprobs?: boolean;
+	/**
+	 * Number of most-likely alternate tokens to return per position, alongside `logprobs`.
+	 * Only honored by OpenAI-compatible adapters (completions); other APIs ignore it.
+	 */
+	topLogprobs?: number;
 	maxTokens?: number;
 	/**
 	 * Preferred transport for providers that support multiple transports.
@@ -361,10 +373,19 @@ export interface TextSignatureV1 {
 	phase?: "commentary" | "final_answer";
 }
 
+export interface TokenLogprob {
+	token: string;
+	logprob: number;
+	bytes?: number[];
+	topLogprobs?: { token: string; logprob: number; bytes?: number[] }[];
+}
+
 export interface TextContent {
 	type: "text";
 	text: string;
 	textSignature?: string; // e.g., for OpenAI responses, message metadata (legacy id string or TextSignatureV1 JSON)
+	/** Per-token logprobs for `text`, indexed the same way as its tokens. Only populated when requested via `StreamOptions.logprobs`. */
+	logprobs?: TokenLogprob[];
 }
 
 export interface ThinkingContent {
