@@ -6,6 +6,7 @@ import {
 	fauxAssistantMessage,
 	fauxToolCall,
 	getCurrentSystemMessage,
+	getCurrentSystemPrompt,
 	getSystemMessageText,
 	type TranscriptContext,
 } from "@earendil-works/pi-ai";
@@ -15,7 +16,11 @@ import { describe, expect, test } from "vitest";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
-import { buildSystemPromptSections, diffSystemPromptSections } from "../src/core/system-prompt.ts";
+import {
+	buildSystemPromptSections,
+	buildSystemPromptState,
+	diffSystemPromptSections,
+} from "../src/core/system-prompt.ts";
 import type { ExtensionFactory } from "../src/index.ts";
 import { createHarness } from "./suite/harness.ts";
 
@@ -92,12 +97,74 @@ describe("system prompt updates", () => {
 		expect(previous.preamble).toBe("You are A.");
 		expect(diffSystemPromptSections(previous, current)).toEqual({ preamble: "You are B." });
 
-		const override = buildSystemPromptSections({ forceSystemPrompt: "Exact prompt.", cwd: "/tmp" });
-		expect(override).toEqual({ preamble: "Exact prompt." });
-		expect(diffSystemPromptSections(current, override)).toEqual({ preamble: "Exact prompt.", cwd: null });
+		expect(buildSystemPromptState({ forceSystemPrompt: "Exact prompt.", cwd: "/tmp" })).toEqual({
+			content: "Exact prompt.",
+		});
+		expect(buildSystemPromptState({ cwd: "/tmp" })).toEqual({
+			content: "",
+			sections: buildSystemPromptSections({ cwd: "/tmp" }),
+		});
 		expect(() => buildSystemPromptSections({ cwd: "/tmp", sections: { preamble: "x" } })).toThrow(
 			"Invalid system prompt section name",
 		);
+	});
+
+	test("a forced prompt is sent as the leading prompt for the run and never recorded", async () => {
+		let turn = 0;
+		const extension: ExtensionFactory = (pi) => {
+			pi.on("before_agent_start", (event) => {
+				if (++turn === 3) event.systemPromptOptions.sections.plan_mode = "Plan only.";
+				return turn === 2 || turn === 3 ? { systemPrompt: "Exact prompt." } : undefined;
+			});
+		};
+		const harness = await createHarness({ extensionFactories: [extension] });
+		try {
+			const requests: TranscriptContext[] = [];
+			harness.setResponses(
+				["one", "two", "three", "four"].map((text) => (providerContext: TranscriptContext) => {
+					requests.push(providerContext);
+					return fauxAssistantMessage(text);
+				}),
+			);
+			for (const text of ["one", "two", "three", "four"]) await harness.session.prompt(text);
+			const systemMessages = requests.map((request) =>
+				request.messages.filter((message) => message.role === "system"),
+			);
+			// Forced turns collapse to one leading message; the unforced fourth turn passes the
+			// recorded head and both plan_mode patches through.
+			expect(systemMessages.map((messages) => messages.length)).toEqual([1, 1, 1, 3]);
+
+			const forced = systemMessages[1]?.at(-1);
+			expect(forced).toEqual({
+				role: "system",
+				content: "Exact prompt.",
+				toolsAdded: systemMessages[0]?.[0]?.toolsAdded,
+				timestamp: systemMessages[0]?.[0]?.timestamp,
+			});
+			expect(systemMessages[2]?.at(-1)).toEqual(forced);
+			expect(getCurrentSystemPrompt(requests[2]!.messages)).toBe("Exact prompt.");
+			expect(requests[2]!.messages.map((message) => message.role)).toEqual([
+				"system",
+				"user",
+				"assistant",
+				"user",
+				"assistant",
+				"user",
+			]);
+
+			// The transcript only records the structured sections, never the forced text.
+			const recorded = harness.session.messages.flatMap((message) =>
+				message.role === "system" ? [message.sections] : [],
+			);
+			expect(recorded).toEqual([
+				systemMessages[0]?.[0]?.sections,
+				{ plan_mode: "<plan_mode>\nPlan only.\n</plan_mode>" },
+				{ plan_mode: null },
+			]);
+			expect(getCurrentSystemPrompt(harness.session.messages)).toBe(harness.session.systemPrompt);
+		} finally {
+			harness.cleanup();
+		}
 	});
 
 	test("setActiveTools emits prompt sections and tool changes before the next request", async () => {
