@@ -363,8 +363,6 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
-	/** Transcript replacement waiting for a point where rewriting context is safe. */
-	private _transcriptReplacedDuringRun = false;
 	private _pendingTranscriptReplacement:
 		| { messages: AgentMessage[]; deliverAs: TranscriptDeliverAs; options?: TranscriptReplacementOptions }
 		| undefined;
@@ -714,9 +712,7 @@ export class AgentSession {
 				: undefined);
 		this.agent.prepareNextTurnWithContext = async (turn, signal) => {
 			// The canonical session projection already reflects any transcript replacement
-			// applied to this run (appendTranscript wrote its boundary before this hook runs);
-			// only the completion bookkeeping flag needs resetting here.
-			this._transcriptReplacedDuringRun = false;
+			// applied to this run (appendTranscript wrote its boundary before this hook runs).
 			const context = await this._compactBeforeNextAssistantResponse({
 				...turn.context,
 				messages: this.sessionManager.buildSessionProjection().messages,
@@ -2022,7 +2018,6 @@ export class AgentSession {
 	private _applyTranscriptReplacement(messages: AgentMessage[], options?: TranscriptReplacementOptions): void {
 		const entryId = this.sessionManager.appendTranscript(messages, options);
 		this.agent.state.messages = messages;
-		this._transcriptReplacedDuringRun = true;
 		const entry = this.sessionManager.getEntry(entryId);
 		if (entry) this._emit({ type: "entry_appended", entry });
 	}
