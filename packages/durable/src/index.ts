@@ -1,8 +1,49 @@
 export { defineDoc, defineDocFamily } from "./documents.ts";
+export { defineEntry } from "./entries.ts";
 export { ReadAfterWrite, StorageRejected } from "./errors.ts";
+export { ConversationConfig, type ConversationConfigState } from "./harness/config.ts";
+export { Harness } from "./harness/harness.ts";
+export { createRegistry } from "./harness/registry.ts";
+export type {
+	AnyTask,
+	ContextView,
+	Conversation,
+	ConversationCreateOptions,
+	ConversationHandle,
+	ConversationInit,
+	DocumentReader,
+	Entry,
+	HarnessOptions,
+	HookRegistration,
+	HookScope,
+	HooksOf,
+	InputSubmissionDraft,
+	ModelRef,
+	PromptInput,
+	PromptSection,
+	PromptSectionWrapper,
+	Registration,
+	Registry,
+	RegistryFailure,
+	RegistryReader,
+	RegistrySnapshot,
+	SettledSubmissionRecord,
+	SettledTask,
+	Submission,
+	SubmissionDraft,
+	ToolControl,
+	ToolExecutionApi,
+	ToolExecutionResult,
+	ToolRegistration,
+	ToolWrapper,
+	UserInput,
+} from "./harness/types.ts";
 export { createSession } from "./session/session.ts";
 export { MemoryStorage } from "./storage/memory.ts";
 export type {
+	CheckpointInfo,
+	CommitChange,
+	CommitPublication,
 	CommonDocDefinition,
 	ContextEdit,
 	ConversationDocFamilyToken,
@@ -17,14 +58,18 @@ export type {
 	DocFamilyToken,
 	DocToken,
 	DocumentAddress,
+	DocumentCommitChange,
 	DocumentContent,
 	DocumentCopySource,
 	DocumentCreate,
 	DocumentId,
+	DocumentObserver,
 	DocumentPoint,
 	DocumentQuery,
 	DocumentRecord,
 	DocumentSemantics,
+	DocumentState,
+	DocumentWatch,
 	EntryDraft,
 	EntryId,
 	EntryQuery,
@@ -46,6 +91,7 @@ export type {
 	SubmissionCreate,
 	SubmissionId,
 	SubmissionRecord,
+	TableCommitChange,
 	Task,
 	TaskDefinition,
 	TaskDocFamilyToken,
@@ -58,5 +104,7 @@ export type {
 	TaskRecord,
 	TaskState,
 	Tx,
+	WatchEnd,
+	WatchHandle,
 } from "./types.ts";
 export { ROOT_CONVERSATION_ID } from "./types.ts";

@@ -10,6 +10,7 @@
 - Replaced untyped numeric record IDs and the `TaskRef` wrapper with erased branded numeric ID types, including result-typed `TaskId<R>`, separately branded commit sequences, and generic `Storage.mintId()`.
 - Made task conversation membership immutable after task creation.
 - Added `ConversationQuery` to Storage and transaction conversation scans.
+- Added required `StoredDocument.deltasSinceBase` to Storage document reads.
 
 ### Added
 
@@ -17,6 +18,15 @@
 - Added document checkpoint selection, lazy version migration, and `Session.snapshotAsOf()` for rewindable conversation documents.
 - Added policy-driven backend-side conversation document copying when creating forks.
 - Added indexed conversation ownership queries and guaranteed no-effect Storage rejection handling.
+- Added incarnation-bound read-only Chord document states and serialized asynchronous document watches with bounded exact-frame buffering.
+- Added `deltasSinceBase` checkpoint predicate information so definitions can bound replay without value counters.
+- Added `Harness.open()` with lazy root creation, atomic conversation creation and forks with `init`, conversation-bound commits, fork-aware entry pagination, model context derivation, and the built-in `ConversationConfig` document with model, thinking level, and active tool accessors.
+- Added `createRegistry()` for tools, tool wrappers, hooks, tasks, and system prompt sections with batched publication and stable keyed ordering.
+- Added `defineEntry()` typed entry kinds.
+
+### Fixed
+
+- Fixed cached documents skipping migration when accessed with a newer definition version, and older definitions reading values migrated only in memory. Document states and watches hydrated under another definition version receive the new value as a root replacement.
 
 ## [0.87.1] - 2026-09-22
 
